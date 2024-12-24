@@ -8,10 +8,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as path from 'path';
 import { z } from "zod";
-import player from 'play-sound';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
-// Initialize audio player
-const audioPlayer = player({});
+const execAsync = promisify(exec);
 
 // Create server instance
 const server = new Server(
@@ -27,19 +27,63 @@ const server = new Server(
   }
 );
 
-// Track current playback process
-let currentPlayback: any = null;
+// Track current playback
+let currentProcess: any = null;
 
 // Define allowed audio extensions
-const ALLOWED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.ogg'];
+const ALLOWED_EXTENSIONS = ['.mp3', '.wav'];
 
 // Zod schema for validating file paths
 const AudioFileSchema = z.object({
   filepath: z.string().refine(
     (path) => ALLOWED_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext)),
-    "File must be a supported audio format (MP3, WAV, M4A, OGG)"
+    "File must be a supported audio format (MP3, WAV)"
   )
 });
+
+// Function to stop current playback
+function stopPlayback() {
+  if (currentProcess) {
+    try {
+      // On Windows, we need to kill the process group
+      process.platform === 'win32' 
+        ? exec('taskkill /F /T /PID ' + currentProcess.pid)
+        : currentProcess.kill();
+    } catch (error) {
+      console.error('Error stopping playback:', error);
+    }
+    currentProcess = null;
+  }
+}
+
+// Function to play audio file using platform-specific commands
+async function playAudioFile(filepath: string): Promise<void> {
+  try {
+    stopPlayback();
+
+    let command: string;
+    if (process.platform === 'win32') {
+      // On Windows, use Windows Media Player CLI
+      command = `"C:\\Program Files\\Windows Media Player\\wmplayer.exe" "${filepath}" /play /close`;
+    } else if (process.platform === 'darwin') {
+      // On macOS
+      command = `afplay "${filepath}"`;
+    } else {
+      // On Linux
+      command = `aplay "${filepath}"`;
+    }
+
+    currentProcess = exec(command, (error) => {
+      if (error) {
+        console.error('Error playing audio:', error);
+      }
+      currentProcess = null;
+    });
+
+  } catch (error) {
+    throw new Error(`Failed to play audio: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -53,7 +97,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             filepath: {
               type: "string",
-              description: "Path to the audio file (must be MP3, WAV, M4A, or OGG)",
+              description: "Path to the audio file (must be MP3 or WAV)",
             },
           },
           required: ["filepath"],
@@ -77,29 +121,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "play-audio") {
-      // Stop any current playback
-      if (currentPlayback) {
-        currentPlayback.kill();
-        currentPlayback = null;
-      }
-
       // Validate input
       const { filepath } = AudioFileSchema.parse(args);
 
       // Start playback
       try {
-        currentPlayback = audioPlayer.play(filepath, (err) => {
-          if (err) {
-            console.error(`Error playing file: ${err}`);
-            currentPlayback = null;
-          }
-        });
-
+        await playAudioFile(filepath);
         return {
           content: [
             {
               type: "text",
-              text: `Started playing: ${path.basename(filepath)}`,
+              text: `Playing: ${path.basename(filepath)}`,
             },
           ],
         };
@@ -108,16 +140,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Failed to play audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              text: `Failed to play audio: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
           isError: true
         };
       }
+
     } else if (name === "stop-audio") {
-      if (currentPlayback) {
-        currentPlayback.kill();
-        currentPlayback = null;
+      if (currentProcess) {
+        stopPlayback();
         return {
           content: [
             {
