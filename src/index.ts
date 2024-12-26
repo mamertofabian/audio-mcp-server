@@ -61,6 +61,7 @@ function stopPlayback() {
 async function playAudioFile(filepath: string): Promise<void> {
   try {
     stopPlayback();
+    // TODO: Clean up this hack!
     // if filepath does not exist, try prefixing with "D:\GitHub\elevenlabs-mcp-server"
     if (!fs.existsSync(filepath)) {
       filepath = path.join("D:\\GitHub\\elevenlabs-mcp-server", filepath);
