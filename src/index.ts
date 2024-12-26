@@ -10,6 +10,7 @@ import * as path from 'path';
 import { z } from "zod";
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as fs from 'fs';
 
 const execAsync = promisify(exec);
 
@@ -60,16 +61,18 @@ function stopPlayback() {
 async function playAudioFile(filepath: string): Promise<void> {
   try {
     stopPlayback();
+    // if filepath does not exist, try prefixing with "D:\GitHub\elevenlabs-mcp-server"
+    if (!fs.existsSync(filepath)) {
+      filepath = path.join("D:\\GitHub\\elevenlabs-mcp-server", filepath);
+    }
 
     let command: string;
     if (process.platform === 'win32') {
-      // On Windows, use Windows Media Player CLI
-      command = `"C:\\Program Files\\Windows Media Player\\wmplayer.exe" "${filepath}" /play /close`;
+      // Use 'start' command with wait flag (/WAIT) to keep process reference
+      command = `start /WAIT "" "${filepath}"`;
     } else if (process.platform === 'darwin') {
-      // On macOS
       command = `afplay "${filepath}"`;
     } else {
-      // On Linux
       command = `aplay "${filepath}"`;
     }
 
